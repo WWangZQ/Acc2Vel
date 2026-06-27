@@ -20,21 +20,18 @@ import android.widget.TextView
 import kotlin.math.sqrt
 
 /**
- * Step-frequency based velocity estimator.
+ * Metro velocity estimator.
  *
- * Why not integrate acceleration?
- * - |a|-g has a positive bias during walking (impact peaks > deceleration dips)
- * - Centripetal acceleration during turns inflates |a|
- * - Low-pass filtered |a|-g drifts upward → velocity only grows
+ * Metro is the ideal case for |a|-g integration because:
+ * 1. No foot-strike bias (unlike walking)
+ * 2. Station stops every 1-3 min → ZUPT resets drift
+ * 3. Smooth acceleration (train, not human limbs)
+ * 4. Wrist is still in the train's reference frame
  *
- * Step-frequency approach:
- * - Each foot strike creates a sharp peak in |accel|
- * - Detect peaks → count steps → measure step interval
- * - Speed = stride_length × step_frequency
- * - stride_length ≈ 0.7m for normal walking
- * - During quiet (no steps): velocity = 0 (ZUPT)
+ * The trick: recalibrate gravity during EVERY station stop.
+ * This kills the cumulative bias that was the #1 problem before.
  *
- * This is how commercial fitness trackers (Fitbit, Garmin, Apple Watch) work.
+ * Turn handling: gyro detects rotation → reduce integration trust.
  */
 class MainActivity : Activity(), SensorEventListener {
 
@@ -49,32 +46,39 @@ class MainActivity : Activity(), SensorEventListener {
 
     // State
     private var isTracking = false
-
-    // Sensor data
-    private var lastAccel = floatArrayOf(0f, 0f, 0f)
     private var sampleCount = 0L
     private var lastTimestampNs = 0L
     private val recentIntervals = ArrayDeque<Long>(100)
 
-    // Step detection
-    private var lastAMag = 0f
-    private var lastLastAMag = 0f
-    private var lastPeakTimeNs = 0L
-    private var stepCount = 0L
+    // Sensor data
+    private var lastAccel = floatArrayOf(0f, 0f, 0f)
+    private var lastGyro = floatArrayOf(0f, 0f, 0f)
+    private var gyroMag = 0f
 
-    // Step interval tracking (for speed calculation)
-    private val stepIntervals = ArrayDeque<Long>(6)  // last 6 step intervals
-    private val STRIDE_LENGTH = 0.7f  // meters per step (adjustable)
+    // Gravity calibration (recalibrated at every station stop)
+    private var gravity = 9.80665f
+    private var gravitySamples = ArrayDeque<Float>(500)  // rolling window for gravity
 
-    // Peak detection state
-    private var inPeak = false
-    private var peakStartTimeNs = 0L
-    private val PEAK_THRESHOLD = 10.3f   // |a| must exceed this to count as a step
-    private val MIN_STEP_INTERVAL_NS = 250_000_000L  // 250ms = max 4 steps/sec
-    private val QUIET_TIMEOUT_NS = 1_500_000_000L     // 1.5s no steps → stopped
+    // Velocity
+    private var velocity = 0f
+    private var maxVelocity = 0f
+    private var netAccelFiltered = 0f
 
-    // Current velocity
-    private var velocity = 0f  // m/s
+    // Stationary detection (for ZUPT + gravity recalibration)
+    private val accelMagBuffer = ArrayDeque<Float>(100)  // ~1s at 100Hz
+    private var stationaryCount = 0        // consecutive stationary readings
+    private var isStationary = false
+    private var wasStationary = false      // previous state (for edge detection)
+    private var stationStops = 0           // count of detected station stops
+    private var lastStationTimeNs = 0L
+
+    // Tuning parameters (metro-optimized)
+    private val LPF_ALPHA = 0.12f          // low-pass filter for net acceleration
+    private val STATIONARY_VAR_THRESHOLD = 0.008f  // variance threshold for "stopped"
+    private val GYRO_QUIET_THRESHOLD = 0.2f  // rad/s — not turning
+    private val STATIONARY_MIN_COUNT = 50    // ~0.5s of quiet → declare stationary
+    private val MAX_SPEED_MS = 30f           // 108 km/h max metro speed
+    private val GYRO_TURN_THRESHOLD = 0.5f   // rad/s — during turns, reduce trust
 
     private val handler = Handler(Looper.getMainLooper())
     private val uiUpdateRunnable = object : Runnable {
@@ -89,7 +93,7 @@ class MainActivity : Activity(), SensorEventListener {
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val pm = getSystemService(POWER_SERVICE) as PowerManager
-        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Acc2Vel:Main")
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Acc2Vel:Metro")
         wakeLock.acquire(60 * 60 * 1000L)
 
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
@@ -101,7 +105,7 @@ class MainActivity : Activity(), SensorEventListener {
         }
 
         statusText = TextView(this).apply {
-            text = "Ready — tap Start"
+            text = "Metro mode — tap Start"
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
             gravity = Gravity.CENTER
         }
@@ -145,19 +149,25 @@ class MainActivity : Activity(), SensorEventListener {
         sampleCount = 0
         lastTimestampNs = 0
         recentIntervals.clear()
-        stepCount = 0
-        stepIntervals.clear()
         velocity = 0f
-        lastAMag = 0f
-        lastLastAMag = 0f
-        lastPeakTimeNs = 0L
-        inPeak = false
+        maxVelocity = 0f
+        netAccelFiltered = 0f
+        gravitySamples.clear()
+        accelMagBuffer.clear()
+        stationaryCount = 0
+        isStationary = true       // start assuming stationary
+        wasStationary = true
+        stationStops = 0
+        lastStationTimeNs = 0L
 
         startButton.text = "Stop"
-        statusText.text = "Tracking..."
+        statusText.text = "Calibrating gravity..."
 
         val rate = SensorManager.SENSOR_DELAY_FASTEST
         sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let {
+            sensorManager.registerListener(this, it, rate)
+        }
+        sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)?.let {
             sensorManager.registerListener(this, it, rate)
         }
 
@@ -169,12 +179,17 @@ class MainActivity : Activity(), SensorEventListener {
         sensorManager.unregisterListener(this)
         handler.removeCallbacks(uiUpdateRunnable)
         startButton.text = "Start"
-        statusText.text = "Stopped — $stepCount steps"
+        statusText.text = "Done — ${stationStops} stops, max ${"%.1f".format(maxVelocity * 3.6f)} km/h"
     }
 
     override fun onSensorChanged(event: SensorEvent) {
-        if (event.sensor.type != Sensor.TYPE_ACCELEROMETER) return
+        when (event.sensor.type) {
+            Sensor.TYPE_ACCELEROMETER -> handleAccel(event)
+            Sensor.TYPE_GYROSCOPE -> handleGyro(event)
+        }
+    }
 
+    private fun handleAccel(event: SensorEvent) {
         lastAccel = event.values.copyOf()
         sampleCount++
 
@@ -190,55 +205,111 @@ class MainActivity : Activity(), SensorEventListener {
 
         if (!isTracking) return
 
-        // Compute |a|
         val aMag = sqrt(
             lastAccel[0] * lastAccel[0] +
             lastAccel[1] * lastAccel[1] +
             lastAccel[2] * lastAccel[2]
         )
 
-        // Step detection: peak in |a| (foot strike creates sharp spike)
-        // A step peak is when |a| exceeds threshold and we see a local maximum
-        if (!inPeak && aMag > PEAK_THRESHOLD) {
-            inPeak = true
-            peakStartTimeNs = ts
+        // Always feed into gravity calibration window (we'll use it when stationary)
+        gravitySamples.addLast(aMag)
+        if (gravitySamples.size > 500) gravitySamples.removeFirst()
+
+        // Stationary detection
+        accelMagBuffer.addLast(aMag)
+        if (accelMagBuffer.size > 100) accelMagBuffer.removeFirst()
+
+        if (accelMagBuffer.size >= 50) {
+            val mean = accelMagBuffer.average().toFloat()
+            val variance = accelMagBuffer.sumOf { ((it - mean) * (it - mean)).toDouble() }.toFloat() / accelMagBuffer.size
+            val gyroQuiet = gyroMag < GYRO_QUIET_THRESHOLD
+
+            isStationary = variance < STATIONARY_VAR_THRESHOLD && gyroQuiet
         }
 
-        if (inPeak) {
-            // Wait for the peak to come back down
-            if (aMag < PEAK_THRESHOLD) {
-                inPeak = false
-
-                // Count this as a step (with minimum interval check)
-                val timeSinceLastStep = if (lastPeakTimeNs > 0) ts - lastPeakTimeNs else Long.MAX_VALUE
-
-                if (timeSinceLastStep > MIN_STEP_INTERVAL_NS) {
-                    stepCount++
-
-                    if (lastPeakTimeNs > 0) {
-                        stepIntervals.addLast(timeSinceLastStep)
-                        if (stepIntervals.size > 6) stepIntervals.removeFirst()
-                    }
-                    lastPeakTimeNs = ts
+        // === Station stop edge detection (transition: moving → stopped) ===
+        if (isStationary && !wasStationary) {
+            // Just became stationary → this is a station stop!
+            stationaryCount++
+            if (stationaryCount >= STATIONARY_MIN_COUNT) {
+                onStationStop(ts)
+            }
+        } else if (isStationary) {
+            stationaryCount++
+            // Keep recalibrating gravity while stationary
+            if (stationaryCount >= STATIONARY_MIN_COUNT && gravitySamples.size >= 30) {
+                val recent = gravitySamples.toList().takeLast(30)
+                val newG = recent.average().toFloat()
+                if (newG in 8.5f..11f) {
+                    gravity = newG
                 }
             }
+        } else {
+            stationaryCount = 0
+        }
+        wasStationary = isStationary
+
+        // === Velocity integration (only when moving) ===
+        if (isStationary) {
+            if (stationaryCount >= STATIONARY_MIN_COUNT) {
+                velocity = 0f
+                netAccelFiltered = 0f
+            }
+            return
         }
 
-        // Update velocity based on step timing
-        val timeSinceLastStep = if (lastPeakTimeNs > 0) ts - lastPeakTimeNs else Long.MAX_VALUE
+        // Net acceleration: |a| - calibrated g
+        val netAccel = aMag - gravity
 
-        if (timeSinceLastStep > QUIET_TIMEOUT_NS) {
-            // No steps for 1.5 seconds → stopped
-            velocity = 0f
-        } else if (stepIntervals.size >= 2) {
-            // Calculate speed from step frequency
-            val avgIntervalNs = stepIntervals.average()
-            val stepFreqHz = 1_000_000_000.0 / avgIntervalNs
-            velocity = (STRIDE_LENGTH * stepFreqHz).toFloat()
+        // Low-pass filter
+        netAccelFiltered += LPF_ALPHA * (netAccel - netAccelFiltered)
 
-            // Clamp to reasonable walking/running range
-            velocity = velocity.coerceIn(0f, 8f)  // max ~29 km/h
+        // Compute dt
+        val dt = if (recentIntervals.isNotEmpty()) {
+            recentIntervals.last() / 1_000_000_000f
+        } else 0.01f
+
+        // Trust factor: reduce during turns (gyro active)
+        val trustFactor = when {
+            gyroMag > 1.5f -> 0.2f    // hard turn → very low trust
+            gyroMag > GYRO_TURN_THRESHOLD -> 0.5f  // gentle turn → moderate trust
+            else -> 1.0f               // straight → full trust
         }
+
+        // Integrate
+        velocity += netAccelFiltered * dt * trustFactor
+
+        // NaN safety
+        if (velocity.isNaN()) velocity = 0f
+
+        // Clamp
+        velocity = velocity.coerceIn(0f, MAX_SPEED_MS)
+        if (velocity > maxVelocity) maxVelocity = velocity
+    }
+
+    private fun onStationStop(ts: Long) {
+        stationStops++
+        lastStationTimeNs = ts
+        velocity = 0f
+        netAccelFiltered = 0f
+
+        // Recalibrate gravity from the stationary window
+        if (gravitySamples.size >= 30) {
+            val recent = gravitySamples.toList().takeLast(50)
+            val newG = recent.average().toFloat()
+            if (newG in 8.5f..11f) {
+                gravity = newG
+            }
+        }
+    }
+
+    private fun handleGyro(event: SensorEvent) {
+        lastGyro = event.values.copyOf()
+        gyroMag = sqrt(
+            lastGyro[0] * lastGyro[0] +
+            lastGyro[1] * lastGyro[1] +
+            lastGyro[2] * lastGyro[2]
+        )
     }
 
     override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) {}
@@ -257,20 +328,20 @@ class MainActivity : Activity(), SensorEventListener {
             lastAccel[2] * lastAccel[2]
         )
 
-        // Step frequency
-        val stepFreq = if (stepIntervals.size >= 2) {
-            1_000_000_000.0 / stepIntervals.average()
-        } else 0.0
+        statusText.text = when {
+            isStationary && stationaryCount >= STATIONARY_MIN_COUNT -> "STOPPED ($stationStops stops)"
+            isStationary -> "Stopping..."
+            gyroMag > GYRO_TURN_THRESHOLD -> "TURNING"
+            else -> "MOVING"
+        }
 
-        val isStopped = velocity < 0.1f
-
-        statusText.text = if (isStopped) "STOPPED" else "WALKING"
         speedText.text = "%.1f km/h".format(speedKmh)
 
         val sb = StringBuilder()
-        sb.appendLine("|a|=${"%.2f".format(aMag)}  steps=$stepCount")
-        sb.appendLine("freq=${"%.1f".format(stepFreq)} Hz  stride=${STRIDE_LENGTH}m")
-        sb.appendLine("v=${"%.2f".format(velocity)} m/s  ${"%.0f".format(rateHz)}Hz")
+        sb.appendLine("|a|=${"%.3f".format(aMag)} g=${"%.3f".format(gravity)}")
+        sb.appendLine("net=${"%+.4f".format(aMag - gravity)} filt=${"%+.4f".format(netAccelFiltered)}")
+        sb.appendLine("gyro=${"%.2f".format(gyroMag)} rad/s  ${"%.0f".format(rateHz)}Hz")
+        sb.appendLine("v=${"%.2f".format(velocity)} m/s  max=${"%.1f".format(maxVelocity * 3.6f)}km/h")
         detailText.text = sb.toString()
     }
 
