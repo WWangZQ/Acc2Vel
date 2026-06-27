@@ -43,6 +43,7 @@ class MainActivity : Activity(), SensorEventListener {
     private lateinit var speedText: TextView
     private lateinit var detailText: TextView
     private lateinit var startButton: Button
+    private lateinit var zuptButton: Button
 
     // State
     private var isTracking = false
@@ -134,6 +135,14 @@ class MainActivity : Activity(), SensorEventListener {
         }
         layout.addView(startButton)
 
+        zuptButton = Button(this).apply {
+            text = "Stopped (ZUPT)"
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            isEnabled = false
+            setOnClickListener { manualZupt() }
+        }
+        layout.addView(zuptButton)
+
         scroll.addView(layout)
         setContentView(scroll)
 
@@ -161,6 +170,7 @@ class MainActivity : Activity(), SensorEventListener {
         lastStationTimeNs = 0L
 
         startButton.text = "Stop"
+        zuptButton.isEnabled = true
         statusText.text = "Calibrating gravity..."
 
         val rate = SensorManager.SENSOR_DELAY_FASTEST
@@ -179,7 +189,26 @@ class MainActivity : Activity(), SensorEventListener {
         sensorManager.unregisterListener(this)
         handler.removeCallbacks(uiUpdateRunnable)
         startButton.text = "Start"
-        statusText.text = "Done — ${stationStops} stops, max ${"%.1f".format(maxVelocity * 3.6f)} km/h"
+        zuptButton.isEnabled = false
+        statusText.text = "Done — max ${"%.1f".format(maxVelocity * 3.6f)} km/h"
+    }
+
+    /** Manual ZUPT: user presses this when metro stops at a station */
+    private fun manualZupt() {
+        velocity = 0f
+        netAccelFiltered = 0f
+        stationStops++
+
+        // Recalibrate gravity from recent samples
+        if (gravitySamples.size >= 30) {
+            val recent = gravitySamples.toList().takeLast(50)
+            val newG = recent.average().toFloat()
+            if (newG in 8.5f..11f) {
+                gravity = newG
+            }
+        }
+
+        statusText.text = "Zeroed — g=${"%.3f".format(gravity)}"
     }
 
     override fun onSensorChanged(event: SensorEvent) {
@@ -215,48 +244,24 @@ class MainActivity : Activity(), SensorEventListener {
         gravitySamples.addLast(aMag)
         if (gravitySamples.size > 500) gravitySamples.removeFirst()
 
-        // Stationary detection
+        // Stationary detection (info only — user presses ZUPT button manually)
         accelMagBuffer.addLast(aMag)
         if (accelMagBuffer.size > 100) accelMagBuffer.removeFirst()
 
         if (accelMagBuffer.size >= 50) {
             val mean = accelMagBuffer.average().toFloat()
             val variance = accelMagBuffer.sumOf { ((it - mean) * (it - mean)).toDouble() }.toFloat() / accelMagBuffer.size
-            val gyroQuiet = gyroMag < GYRO_QUIET_THRESHOLD
-
-            isStationary = variance < STATIONARY_VAR_THRESHOLD && gyroQuiet
+            isStationary = variance < STATIONARY_VAR_THRESHOLD && gyroMag < GYRO_QUIET_THRESHOLD
         }
 
-        // === Station stop edge detection (transition: moving → stopped) ===
-        if (isStationary && !wasStationary) {
-            // Just became stationary → this is a station stop!
-            stationaryCount++
-            if (stationaryCount >= STATIONARY_MIN_COUNT) {
-                onStationStop(ts)
-            }
-        } else if (isStationary) {
-            stationaryCount++
-            // Keep recalibrating gravity while stationary
-            if (stationaryCount >= STATIONARY_MIN_COUNT && gravitySamples.size >= 30) {
-                val recent = gravitySamples.toList().takeLast(30)
-                val newG = recent.average().toFloat()
-                if (newG in 8.5f..11f) {
-                    gravity = newG
-                }
-            }
-        } else {
-            stationaryCount = 0
+        // Continuously update gravity estimate (rolling window of quiet samples)
+        if (isStationary && gravitySamples.size >= 30) {
+            val recent = gravitySamples.toList().takeLast(30)
+            val newG = recent.average().toFloat()
+            if (newG in 8.5f..11f) gravity = newG
         }
-        wasStationary = isStationary
 
-        // === Velocity integration (only when moving) ===
-        if (isStationary) {
-            if (stationaryCount >= STATIONARY_MIN_COUNT) {
-                velocity = 0f
-                netAccelFiltered = 0f
-            }
-            return
-        }
+        // === Velocity integration (always, no auto-ZUPT) ===
 
         // Net acceleration: |a| - calibrated g
         val netAccel = aMag - gravity
