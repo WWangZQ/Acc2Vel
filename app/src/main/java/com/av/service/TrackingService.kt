@@ -14,7 +14,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
-import com.av.MainActivity
+import com.av.ui.MainActivity
 import com.av.R
 import com.av.data.GpsFix
 import com.av.data.ImuSample

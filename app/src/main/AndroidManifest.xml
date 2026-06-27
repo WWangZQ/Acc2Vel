@@ -1,30 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- IMU sensors: no permission needed on standard Android -->
-    <!-- Barometer: no permission needed -->
-
-    <!-- GPS / Location (for later, not needed for probe) -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-
-    <!-- Foreground service (for later) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
-        android:name=".ProbeApplication"
+        android:name=".AvApplication"
         android:allowBackup="true"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.AccelerateToVelocity">
 
-        <!-- Sensor probe: zero-dependency Activity for watch testing -->
         <activity
-            android:name=".SensorProbeActivity"
+            android:name=".MainActivity"
             android:exported="true"
+            android:keepScreenOn="true"
             android:theme="@style/Theme.AccelerateToVelocity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -32,19 +26,15 @@
             </intent-filter>
         </activity>
 
-        <!-- Full tracking UI (Compose) — not used in probe build -->
-        <!--
         <activity
-            android:name=".MainActivity"
-            android:exported="true"
+            android:name=".SensorProbeActivity"
+            android:exported="false"
+            android:keepScreenOn="true"
             android:theme="@style/Theme.AccelerateToVelocity" />
-        -->
 
-        <!--
         <service
             android:name=".service.TrackingService"
             android:foregroundServiceType="location"
             android:exported="false" />
-        -->
     </application>
 </manifest>

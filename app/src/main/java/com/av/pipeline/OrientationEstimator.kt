@@ -18,7 +18,7 @@ import kotlin.math.sqrt
  *             Typical range: 0.01 - 0.5. Start with 0.1.
  */
 class OrientationEstimator(
-    private val sampleRateHz: Float = 200f,
+    private val sampleRateHz: Float = 100f,
     var beta: Float = 0.1f
 ) {
     private var q = Quaternion.IDENTITY
