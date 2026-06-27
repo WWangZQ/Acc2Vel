@@ -13,7 +13,7 @@ object Matrix3x3 {
     )
 
     /** Matrix-vector multiplication: result = M * v */
-    fun multiply(m: FloatArray, v: FloatArray): FloatArray {
+    fun multiplyVec(m: FloatArray, v: FloatArray): FloatArray {
         require(m.size >= 9 && v.size >= 3)
         return floatArrayOf(
             m[0] * v[0] + m[1] * v[1] + m[2] * v[2],

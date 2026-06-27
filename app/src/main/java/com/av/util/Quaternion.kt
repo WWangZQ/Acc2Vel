@@ -85,7 +85,7 @@ data class Quaternion(
         // Pitch (y-axis rotation)
         val sinp = 2f * (q.w * q.y - q.z * q.x)
         val pitch = if (kotlin.math.abs(sinp) >= 1f)
-            kotlin.math.copySign(kotlin.math.PI.toFloat() / 2f, sinp)
+            (if (sinp > 0) kotlin.math.PI.toFloat() / 2f else -kotlin.math.PI.toFloat() / 2f)
         else kotlin.math.asin(sinp)
 
         // Yaw (z-axis rotation)

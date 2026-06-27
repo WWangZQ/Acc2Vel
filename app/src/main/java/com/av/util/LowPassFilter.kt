@@ -21,7 +21,7 @@ class LowPassFilter(private val alpha: Float) {
             initialized = true
             return state
         }
-        for (i in state.indices.coerceAtMost(input.size)) {
+        for (i in 0 until minOf(state.size, input.size)) {
             state[i] = state[i] + alpha * (input[i] - state[i])
         }
         return state

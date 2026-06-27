@@ -4,3 +4,6 @@ local.properties
 *.iml
 .idea
 .DS_Store
+app/build/
+local.properties
+gradle/wrapper/gradle-wrapper.jar

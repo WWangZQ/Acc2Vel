@@ -125,7 +125,6 @@ class SensorProbeActivity : Activity(), SensorEventListener {
                 Sensor.TYPE_LIGHT -> "LIGHT"
                 Sensor.TYPE_ROTATION_VECTOR -> "ROT"
                 Sensor.TYPE_GAME_ROTATION_VECTOR -> "GAME_ROT"
-                Sensor.TYPE_LINEAR_ACCEL -> "LIN_ACCEL"
                 Sensor.TYPE_GRAVITY -> "GRAVITY"
                 else -> "TYPE_${s.type}"
             }

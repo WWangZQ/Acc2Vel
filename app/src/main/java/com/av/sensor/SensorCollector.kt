@@ -84,9 +84,9 @@ class SensorCollector(
      * values merged in.
      */
     fun imuFlow(): Flow<ImuSample> = callbackFlow {
-        @Volatile var latestGyro: FloatArray? = null
-        @Volatile var latestMag: FloatArray? = null
-        @Volatile var latestPressure: Float? = null
+        var latestGyro: FloatArray? = null
+        var latestMag: FloatArray? = null
+        var latestPressure: Float? = null
 
         val listener = object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent) {
