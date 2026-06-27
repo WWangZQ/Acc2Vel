@@ -173,7 +173,14 @@ class MainActivity : Activity(), SensorEventListener {
 
     private fun finishCalibration() {
         // Average |a| during stationary period → true gravity on this device
-        gravity = calibrationSamples.average().toFloat()
+        gravity = if (calibrationSamples.isNotEmpty()) {
+            calibrationSamples.average().toFloat()
+        } else {
+            9.80665f  // fallback
+        }
+        // Sanity check: gravity should be 8-11 m/s² on Earth
+        if (gravity.isNaN() || gravity < 8f || gravity > 11f) gravity = 9.80665f
+
         calibrationSamples.clear()
         calibrating = false
         calibrationDone = true
@@ -272,6 +279,10 @@ class MainActivity : Activity(), SensorEventListener {
             // During high gyro activity, the |a| approach is unreliable
             val trustFactor = if (gyroMagnitude < 2.0f) 1f else 0.3f
             velocity += netAccelFiltered * dt * trustFactor
+
+            // NaN safety
+            if (velocity.isNaN()) velocity = 0f
+            if (netAccelFiltered.isNaN()) netAccelFiltered = 0f
 
             // Clamp to reasonable range (0 - 120 km/h = 33 m/s)
             velocity = velocity.coerceIn(0f, 33f)
