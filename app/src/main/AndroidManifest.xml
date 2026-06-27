@@ -1,31 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- IMU sensors (accel, gyro, mag) don't need runtime permission on Android -->
-    <!-- Barometer doesn't need permission either -->
+    <!-- IMU sensors: no permission needed on standard Android -->
+    <!-- Barometer: no permission needed -->
 
-    <!-- GPS / Location -->
+    <!-- GPS / Location (for later, not needed for probe) -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
-    <!-- Foreground service to keep tracking when screen off -->
+    <!-- Foreground service (for later) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-
-    <!-- Wake lock to keep CPU running during tracking -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
-        android:name=".AvApplication"
+        android:name=".ProbeApplication"
         android:allowBackup="true"
-        android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.AccelerateToVelocity">
 
+        <!-- Sensor probe: zero-dependency Activity for watch testing -->
         <activity
-            android:name=".MainActivity"
+            android:name=".SensorProbeActivity"
             android:exported="true"
             android:theme="@style/Theme.AccelerateToVelocity">
             <intent-filter>
@@ -34,9 +32,19 @@
             </intent-filter>
         </activity>
 
+        <!-- Full tracking UI (Compose) — not used in probe build -->
+        <!--
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.AccelerateToVelocity" />
+        -->
+
+        <!--
         <service
             android:name=".service.TrackingService"
             android:foregroundServiceType="location"
             android:exported="false" />
+        -->
     </application>
 </manifest>

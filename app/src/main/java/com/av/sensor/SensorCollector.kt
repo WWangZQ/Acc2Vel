@@ -1,41 +1,38 @@
 package com.av.sensor
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.os.SystemClock
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.Bundle
+import android.os.Looper
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.av.data.GpsFix
 import com.av.data.ImuSample
 import com.av.data.SensorInfo
-import com.google.android.gms.location.FusedLocationProviderClient
-import com.google.android.gms.location.LocationCallback
-import com.google.android.gms.location.LocationRequest
-import com.google.android.gms.location.LocationResult
-import com.google.android.gms.location.Priority
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
- * Wraps Android SensorManager and FusedLocationProviderClient to stream
+ * Wraps Android SensorManager and LocationManager to stream
  * IMU samples and GPS fixes as coroutine Flows.
  *
- * Accelerometer, gyroscope, magnetometer, and barometer are fused into
- * a single [ImuSample] per accelerometer tick (fastest sensor).
- * GPS fixes are emitted independently on their own cadence.
+ * Uses standard Android LocationManager (no Google Play Services dependency).
+ * This is compatible with Chinese-market watches that lack GMS.
  */
-@Singleton
-class SensorCollector @Inject constructor(
-    @ApplicationContext private val context: Context,
-    private val fusedLocationClient: FusedLocationProviderClient
+class SensorCollector(
+    private val context: Context
 ) {
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+    private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
     // Sensor references
     private val accelSensor: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
@@ -51,12 +48,21 @@ class SensorCollector @Inject constructor(
      * Query what sensors are available and their specs.
      */
     fun getSensorInfo(): SensorInfo {
+        // Check all available sensors for logging
+        val allSensors = sensorManager.getSensorList(Sensor.TYPE_ALL)
+        Log.i(TAG, "=== All available sensors (${allSensors.size}) ===")
+        for (s in allSensors) {
+            Log.i(TAG, "  [${s.type}] ${s.name} (${s.vendor}) — range=${s.maximumRange}, res=${s.resolution}, minDelay=${s.minDelay}µs")
+        }
+        Log.i(TAG, "=== End sensor list ===")
+
         return SensorInfo(
             hasAccelerometer = accelSensor != null,
             hasGyroscope = gyroSensor != null,
             hasMagnetometer = magSensor != null,
             hasBarometer = pressureSensor != null,
-            hasGps = true,  // assume GPS is available; will fail gracefully if not
+            hasGps = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                    locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER),
             accelMaxRange = accelSensor?.maximumRange ?: 0f,
             gyroMaxRange = gyroSensor?.maximumRange ?: 0f,
             accelResolution = accelSensor?.resolution ?: 0f,
@@ -66,7 +72,6 @@ class SensorCollector @Inject constructor(
     }
 
     private fun estimateMaxRate(): Int {
-        // SENSOR_DELAY_FASTEST is typically 200-500 Hz depending on hardware
         return accelSensor?.let { sensor ->
             val minDelayUs = sensor.minDelay
             if (minDelayUs > 0) 1_000_000 / minDelayUs else 200
@@ -79,7 +84,6 @@ class SensorCollector @Inject constructor(
      * values merged in.
      */
     fun imuFlow(): Flow<ImuSample> = callbackFlow {
-        // Buffers for latest non-accel readings (merged on accel tick)
         @Volatile var latestGyro: FloatArray? = null
         @Volatile var latestMag: FloatArray? = null
         @Volatile var latestPressure: Float? = null
@@ -115,7 +119,6 @@ class SensorCollector @Inject constructor(
             }
         }
 
-        // Register all sensors at fastest rate
         val rate = SensorManager.SENSOR_DELAY_FASTEST
         accelSensor?.let { sensorManager.registerListener(listener, it, rate) }
         gyroSensor?.let { sensorManager.registerListener(listener, it, rate) }
@@ -133,38 +136,63 @@ class SensorCollector @Inject constructor(
     }
 
     /**
-     * Stream GPS fixes. Uses FusedLocationProvider with high accuracy.
-     * Interval: 1 second (fast enough for velocity ground-truth).
+     * Stream GPS fixes using standard LocationManager (no Google Play Services).
      */
     fun gpsFlow(): Flow<GpsFix> = callbackFlow {
-        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000L)
-            .setMinUpdateIntervalMillis(500L)
-            .build()
+        val hasPermission = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
 
-        val callback = object : LocationCallback() {
-            override fun onLocationResult(result: LocationResult) {
-                for (location in result.locations) {
-                    val fix = GpsFix(
-                        timestampNs = SystemClock.elapsedRealtimeNanos(),
-                        lat = location.latitude,
-                        lon = location.longitude,
-                        speed = location.speed,
-                        bearing = location.bearing,
-                        accuracy = location.accuracy
-                    )
-                    trySend(fix)
-                }
+        if (!hasPermission) {
+            close(SecurityException("Location permission not granted"))
+            return@callbackFlow
+        }
+
+        val listener = object : LocationListener {
+            override fun onLocationChanged(location: Location) {
+                val fix = GpsFix(
+                    timestampNs = android.os.SystemClock.elapsedRealtimeNanos(),
+                    lat = location.latitude,
+                    lon = location.longitude,
+                    speed = location.speed,
+                    bearing = location.bearing,
+                    accuracy = location.accuracy
+                )
+                trySend(fix)
             }
+
+            @Deprecated("Deprecated in API")
+            override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+            override fun onProviderEnabled(provider: String) {}
+            override fun onProviderDisabled(provider: String) {}
         }
 
         try {
-            fusedLocationClient.requestLocationUpdates(request, callback, null)
+            // Try GPS provider first
+            if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                locationManager.requestLocationUpdates(
+                    LocationManager.GPS_PROVIDER,
+                    1000L, // min time ms
+                    0f,    // min distance meters
+                    listener,
+                    Looper.getMainLooper()
+                )
+            }
+            // Also try network provider as fallback
+            if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                locationManager.requestLocationUpdates(
+                    LocationManager.NETWORK_PROVIDER,
+                    1000L, 0f,
+                    listener,
+                    Looper.getMainLooper()
+                )
+            }
         } catch (e: SecurityException) {
             close(e)
         }
 
         awaitClose {
-            fusedLocationClient.removeLocationUpdates(callback)
+            locationManager.removeUpdates(listener)
             Log.d(TAG, "GPS listener removed")
         }
     }
