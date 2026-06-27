@@ -1,0 +1,33 @@
+{
+  "lineName": "Beijing Metro Line 1",
+  "lineNameZh": "北京地铁1号线",
+  "totalLengthMeters": 30400,
+  "avgSpeedMps": 18.0,
+  "maxSpeedMps": 25.0,
+  "stations": [
+    {"name": "Pingguoyuan", "nameZh": "苹果园", "distanceFromStartMeters": 0, "isUnderground": true},
+    {"name": "Gucheng", "nameZh": "古城", "distanceFromStartMeters": 1800, "isUnderground": true},
+    {"name": "Babaoshan", "nameZh": "八宝山", "distanceFromStartMeters": 3400, "isUnderground": true},
+    {"name": "Yuquanlu", "nameZh": "玉泉路", "distanceFromStartMeters": 5100, "isUnderground": true},
+    {"name": "Wukesong", "nameZh": "五棵松", "distanceFromStartMeters": 6700, "isUnderground": true},
+    {"name": "Wanshoulu", "nameZh": "万寿路", "distanceFromStartMeters": 8100, "isUnderground": true},
+    {"name": "Gongzhufen", "nameZh": "公主坟", "distanceFromStartMeters": 9500, "isUnderground": true},
+    {"name": "Junbo", "nameZh": "军事博物馆", "distanceFromStartMeters": 10800, "isUnderground": true},
+    {"name": "Muxidi", "nameZh": "木樨地", "distanceFromStartMeters": 12000, "isUnderground": true},
+    {"name": "Nanlishilu", "nameZh": "南礼士路", "distanceFromStartMeters": 13200, "isUnderground": true},
+    {"name": "Fuxingmen", "nameZh": "复兴门", "distanceFromStartMeters": 14400, "isUnderground": true},
+    {"name": "Xidan", "nameZh": "西单", "distanceFromStartMeters": 15600, "isUnderground": true},
+    {"name": "Tiananmenxi", "nameZh": "天安门西", "distanceFromStartMeters": 16800, "isUnderground": true},
+    {"name": "Tiananmendong", "nameZh": "天安门东", "distanceFromStartMeters": 17700, "isUnderground": true},
+    {"name": "Wangfujing", "nameZh": "王府井", "distanceFromStartMeters": 18600, "isUnderground": true},
+    {"name": "Dongdan", "nameZh": "东单", "distanceFromStartMeters": 19500, "isUnderground": true},
+    {"name": "Jianguomen", "nameZh": "建国门", "distanceFromStartMeters": 20800, "isUnderground": true},
+    {"name": "Yonganli", "nameZh": "永安里", "distanceFromStartMeters": 22000, "isUnderground": true},
+    {"name": "Guomao", "nameZh": "国贸", "distanceFromStartMeters": 23200, "isUnderground": true},
+    {"name": "Dawanglu", "nameZh": "大望路", "distanceFromStartMeters": 24400, "isUnderground": true},
+    {"name": "Sihui", "nameZh": "四惠", "distanceFromStartMeters": 26000, "isUnderground": false},
+    {"name": "Sihuidong", "nameZh": "四惠东", "distanceFromStartMeters": 27800, "isUnderground": false},
+    {"name": "Gaobeidian", "nameZh": "高碑店", "distanceFromStartMeters": 29200, "isUnderground": false},
+    {"name": "Chuanmeidaxue", "nameZh": "传媒大学", "distanceFromStartMeters": 30400, "isUnderground": false}
+  ]
+}
