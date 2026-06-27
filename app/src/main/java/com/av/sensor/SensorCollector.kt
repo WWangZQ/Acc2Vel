@@ -20,8 +20,6 @@ import com.av.data.SensorInfo
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Wraps Android SensorManager and LocationManager to stream
@@ -30,9 +28,8 @@ import javax.inject.Singleton
  * Uses standard Android LocationManager (no Google Play Services dependency).
  * Compatible with Chinese-market watches (OPPO Watch 3 Pro, no GMS).
  */
-@Singleton
-class SensorCollector @Inject constructor(
-    @dagger.hilt.android.qualifiers.ApplicationContext private val context: Context
+class SensorCollector(
+    private val context: Context
 ) {
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager

@@ -17,9 +17,7 @@ import androidx.compose.material3.Surface
 import androidx.core.content.ContextCompat
 import com.av.service.TrackingService
 import com.av.ui.theme.AvTheme
-import dagger.hilt.android.AndroidEntryPoint
 
-@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
     private var trackingService: TrackingService? = null

@@ -1,7 +1,14 @@
 package com.av
 
 import android.app.Application
-import dagger.hilt.android.HiltAndroidApp
 
-@HiltAndroidApp
-class AvApplication : Application()
+class AvApplication : Application() {
+
+    lateinit var sensorCollector: com.av.sensor.SensorCollector
+        private set
+
+    override fun onCreate() {
+        super.onCreate()
+        sensorCollector = com.av.sensor.SensorCollector(this)
+    }
+}

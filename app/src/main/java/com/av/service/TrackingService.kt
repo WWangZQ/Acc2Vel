@@ -23,8 +23,8 @@ import com.av.data.SensorInfo
 import com.av.data.StationEvent
 import com.av.data.TrackingStatus
 import com.av.ekf.ExtendedKalmanFilter
+import com.av.AvApplication
 import com.av.sensor.SensorCollector
-import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,19 +33,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 /**
  * Foreground service that owns the IMU → velocity pipeline.
  * Keeps processing even when the screen is off.
- *
- * Phase 1: streams raw sensor data for validation.
- * Phase 2+: full pipeline (orientation → accel transform → EKF → velocity).
  */
-@AndroidEntryPoint
 class TrackingService : LifecycleService() {
 
-    @Inject lateinit var sensorCollector: SensorCollector
+    private lateinit var sensorCollector: SensorCollector
 
     private val _status = MutableStateFlow(TrackingStatus.IDLE)
     val status: StateFlow<TrackingStatus> = _status.asStateFlow()
@@ -95,6 +90,7 @@ class TrackingService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
+        sensorCollector = (application as AvApplication).sensorCollector
         createNotificationChannel()
     }
 
